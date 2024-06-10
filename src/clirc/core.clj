@@ -1,74 +1,164 @@
 (ns clirc.core
-  (:gen-class))
+  (:gen-class)
+  (:require [clojure.core.match :refer [match]]
+            [clirc.bool-logic :refer [map->bitvec]]))
 
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
   (println "Hello, World!"))
 
-;; # Compute CMP:{0,1}^4-->{0,1}
-;; # CMP(X)=1 iff 2X[0]+X[1] > 2X[2] + X[3]
-;; temp_1 = NOT(X[2])
-;; temp_2 = AND(X[0],temp_1)
-;; temp_3 = OR(X[0],temp_1)
-;; temp_4 = NOT(X[3])
-;; temp_5 = AND(X[1],temp_4)
-;; temp_6 = AND(temp_5,temp_3)
-;; Y[0] = OR(temp_2,temp_6)
+
+;;; There are 4 dialects of the language Clirc (CIRC): AON, IZO, NAND and NOR.
+;;; The only difference between then is the set of predefined functions that
+;;; they recognize:
+;;;
+;;; - AON: and, or, not
+;;; - IZO: if, zero, one
+;;; - NAND: nand
+;;; - NOR: nor
+;;;
+;;; So there is a general function called `eval-prog`, that evaluates program in
+;;; all dialects. This function receives as first argument, a map with the
+;;; predefined functions. Each predefined function will be defined by a symbol
+;;; -- the name of the function -- as key, and a record (map) with keys for the
+;;; `:arity` (number of arguments) of the function and the `:body` of the
+;;; function.
+
+(declare eval-prog)
+
+(def aon-funcs
+  "Set of predefined functions for the AON dilect."
+  {'and {:arity 2 :body #(min %1 %2)}
+   'or  {:arity 2 :body #(max %1 %2)}
+   'not {:arity 1 :body #(- 1 %1)}})
+
+(defn eval-prog-aon
+  "Helper function to evaluate AON-Clirc programs. See also [[eval-prog]]."
+  [prog input]
+  (eval-prog aon-funcs prog input))
 
 
-(def cmp '[(set! temp1 (not (:in 2)))
-           (set! temp2 (and (:in 0) temp1))
-           (set! temp3 (or (:in 0) temp1))
-           (set! temp4 (not (:in 3)))
-           (set! temp5 (and (:in 1) temp4))
-           (set! temp6 (and temp5 temp3))
-           (set! (:out 0) (or temp2 temp6))])
+(def izo-funcs
+  "Set of predefined functions for the IZO dilect."
+  {'if   {:arity 3 :body #(if (= %1 1) %2 %3)}
+   'zero {:arity 1 :body (fn [_] 0)}
+   'one  {:arity 1 :body (fn [_] 1)}})
 
-(defn aon-operand-eval
-  [operand env]
-  (cond
-    ;; Operando nulo
-    (nil? operand) nil
-    ;; Operando é variável
-    (symbol? operand) (get env operand)
-    ;; Operando é input
-    (and (list? operand) (= (first operand) :in))
-    (get-in env [:in (nth operand 1)])
-    ;; Operando é output
-    (and (list? operand) (= (first operand) :out))
-    (get-in env [:out (nth operand 1)])
-    ;; Caso contrário
-    :else (throw (Error. "Operando inválido."))))
-
-(defn aon-func-eval
-  [expr env]
-  (let [func (nth expr 0)
-        op1 (nth expr 1)
-        op2 (nth expr 2 nil)
-        val1 (aon-operand-eval op1 env)
-        val2 (aon-operand-eval op2 env)]
-    (case func
-      and (* val1 val2)
-      or (max val1 val2)
-      not (- 1 val1))))
+(defn eval-prog-izo
+  "Helper function to evaluate IZO-Clirc programs. See also [[eval-prog]]."
+  [prog input]
+  (eval-prog izo-funcs prog input))
 
 
-(defn aon-eval [prog input]
-  (loop [prog1 prog env {:in input :out {}}]
+(def nand-funcs
+  "Set of predefined functions for the NAND dilect."
+  {'nand {:arity 2 :body #(- 1 (* %1 %2))}})
+
+(defn eval-prog-nand
+  "Helper function to evaluate AON-Clirc programs. See also [[eval-prog]]."
+  [prog input]
+  (eval-prog nand-funcs prog input))
+
+
+(def nor-funcs
+  "Set of predefined functions for the NOR dilect."
+  {'nor {:arity 2 :body #(- 1 (max %1 %2))}})
+
+(defn eval-prog-nor
+  "Helper function to evaluate AON-Clirc programs. See also [[eval-prog]]."
+  [prog input]
+  (eval-prog nor-funcs prog input))
+
+
+(declare eval-funcall)
+
+(defn eval-prog
+  "Evaluates, i.e., executes, Clirc programs for a given input with a given
+  set of predefined functions.
+
+  - `predefs` is the set of predefined function. It defines the dialect of
+  the Clirc language being used.
+
+  - `prog` is the program to be evaluated, i.e., a sequence of assignments.
+  The only kind of statement accepted in the core evaluator is the assignment.
+  The syntax of the assignment is `(set! lhs rhs)`, where `lhs` stands for
+  *left hand side*, and `rhs` stands for *right hand side*. The `lhs` can be
+  a variable (symbol) or the output. The `rhs` is a function call. See also
+  [[eval-funcall]].
+
+  - `input` is an array of zeros and ones making the input of the program.
+
+  The function will return a map with the output generatde by the execution
+  of `prog` for the given `input` values. Only the output indexes that have
+  been assigned values in `prog` will be present in the output map.
+  "
+  [predefs prog input]
+  (loop [sttmts prog, env (assoc predefs :in input :out {})]
+    (if (empty? sttmts)
+      (map->bitvec (:out env))
+      (let [sttmt (first sttmts)
+            lhs (nth sttmt 1)
+            rhs (nth sttmt 2)
+            value (eval-funcall rhs env)]
+        (match [lhs]
+          ;; Assignment to variable
+          [(var :guard symbol?)]
+          (recur (rest sttmts) (assoc env var value))
+          ;; Assignment to output
+          [([:out n] :seq)]
+          (recur (rest sttmts) (assoc-in env [:out n] value))
+          ;; Se for outra coisa
+          :else (throw (Error. "LHS inválido.")))))))
+
+
+(declare eval-expr)
+
+(defn eval-funcall
+  "Evaluates a predefined function call.
+
+  - `funcall` is the expression representing the function call, with the
+  syntax `(fname arg1 ... argn)`, where `fname` is the name (symbol) of a
+  predefined function, and the `arg`s are variables, inputs or outputs.
+  The inputs are defined as `(:in n)`, and the output as `(:out n)`, where
+  `n` is a non-negative integer.
+
+  - `env` is the environment where the function will be evaluated.
+
+  Returns the numerical result (zero or one) resulting from the function call
+  evaluation.
+  "
+  [funcall env]
+  (let [fname (first funcall)
+        args (rest funcall)
+        func (get env fname)]
     (cond
-      (empty? prog1) (get env :out)
-      :else (let [sttmt1 (first prog1)
-                  lhs (nth sttmt1 1)
-                  rhs (nth sttmt1 2)
-                  value (aon-func-eval rhs env)]
-              (cond
-                ;; Se for variável
-                (symbol? lhs)
-                (recur (rest prog1) (assoc env lhs value))
-                ;; Se for :out
-                (and (list? lhs) (= (first lhs) :out))
-                (recur (rest prog1) (assoc-in env [:out (nth lhs 1)] value))
-                ;; Se for outra coisa
-                :else (throw (Error. "LHS inválido.")))))))
+      ;;
+      (nil? func)
+      (throw (ex-info "Undefined function." {:fname fname :args args}))
+      ;;
+      (not= (count args) (:arity func))
+      (throw (ex-info "Wrong number of arguments." {:fname fname :args args}))
+      ;;
+      :else
+      (let [arg-values (map #(eval-expr %1 env) args)]
+        (apply (:body func) arg-values)))))
 
+
+(defn eval-expr
+  "Evaluates expressions in the *Clirc* language with a given environment.
+
+  - `expr` the expression to be evaluated. The valid expressions are: `nil`,
+  varibles, inputs, and outputs.
+
+  - `env` the environment used to evaluate the expressions.
+
+  Returns the numeric value (zero or one) of the expression."
+  [expr env]
+  (match [expr]
+    [nil] nil
+    [([:in n] :seq)] (get-in env [:in n])
+    [([:out n] :seq)] (get-in env [:out n])
+    [(x :guard symbol?)] (get env x)
+    :else (throw (ex-info "Invalid expression."
+                          {:expr expr :env env}))))
