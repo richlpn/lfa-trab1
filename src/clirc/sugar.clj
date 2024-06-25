@@ -108,3 +108,34 @@
                               :count ex-count})
     ;;
     ))
+
+;; ====================== Meu código =======================
+
+(declare expand-if
+         expand-if-block
+         expand-if-block-sstmt)
+
+(defn expand-if 
+  [prog]
+  (letfn [(expand-cond [acc sttmt]
+          (let [pro_sttmt (expand-if-block sstmt 
+              (:count acc))]
+              {:sttmt (into [] (concat (:sttmt acc) (:sttmt pro_sttmt)))
+              :count (:count pro_sttmt)}))])
+
+  (->> prog
+  (reduce expand-if-block {:sttmt [] :count 0})))
+
+(defn expand-if-block
+  [sttmt count]
+  (match [sttmt]
+    [(['if expr then otherwise] :seq)] ;; É uma estrutura if? 
+      (let [ex-cond 
+        (expand-if-block-sstmt expr then otherwise count)]
+        {:sttmt (conj (:prep ex-cond) `(:rawcalls ex-cond))
+        :count (:count ex-cond)})))
+
+(defn expand-if-block-sstmt
+[expression then otherwise count]
+{:prep ["code1" "code2"] :count 0 :rawcalls ["code3" "code4"]}
+)

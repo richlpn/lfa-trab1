@@ -1,12 +1,14 @@
 (ns clirc.core
   (:gen-class)
   (:require [clojure.core.match :refer [match]]
-            [clirc.bool-logic :refer [map->bitvec]]))
-
+            [clirc.bool-logic :refer [map->bitvec]]
+            [clirc.probl2 :as p :refer [expand-if]]
+            ))
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (println "Hello, World!"))
+  
+)
 
 
 ;;; There are 4 dialects of the language Clirc (CIRC): AON, IZO, NAND and NOR.
@@ -82,7 +84,7 @@
 
   - `prog` is the program to be evaluated, i.e., a sequence of assignments.
   The only kind of statement accepted in the core evaluator is the assignment.
-  The syntax of the assignment is `(set! lhs rhs)`, where `lhs` stands for
+  The syntax of the assignment is `(f lhs rhs)`, where `lhs` stands for
   *left hand side*, and `rhs` stands for *right hand side*. The `lhs` can be
   a variable (symbol) or the output. The `rhs` is a function call. See also
   [[eval-funcall]].
